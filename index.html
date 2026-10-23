@@ -50,7 +50,7 @@ button.big:hover{background:#9af5e2}
     <div id="overlay"></div>
   </div>
   <div id="panel">
-    <div id="meta"><span id="dom"></span><span id="prog"></span><button id="mus" class="opt" style="padding:2px 10px;font-size:12px">♪ Music: ON</button></div>
+    <div id="meta"><span id="dom"></span><span id="prog"></span><span id="time" role="timer" aria-label="Time remaining">TIME 25:00</span><button id="mus" class="opt" style="padding:2px 10px;font-size:12px">♪ Music: ON</button></div>
     <div id="q"></div>
     <div id="opts"></div>
     <div id="exp"></div>
@@ -297,12 +297,24 @@ async function heroFalls(){
 }
 
 /* ===================== QUIZ FLOW ===================== */
-let deck=[],qi=0,correct=0,locked=true,current=null,ended=false;
+const TIME_LIMIT_MS=25*60*1000;
+let deck=[],qi=0,correct=0,locked=true,current=null,ended=false,answering=false,timerEndsAt=0,timerInterval=null;
+function updateTimer(){
+  if(ended||!timerEndsAt)return;
+  const remaining=Math.max(0,timerEndsAt-performance.now());
+  const seconds=Math.ceil(remaining/1000);
+  $('time').textContent='TIME '+String(Math.floor(seconds/60)).padStart(2,'0')+':'+String(seconds%60).padStart(2,'0');
+  if(remaining===0){ended=true;clearInterval(timerInterval);timerInterval=null;finish(false,true);}
+}
 function startRun(){
   startMusic();
   hero=mkActor('hero','hero',HERO_HOME,HERO_MAX);enemy=mkActor('enemy','enemy',ENEMY_HOME,ENEMY_MAX);
   particles=[];floaters=[];rings=[];arc=null;vignette=0;shake=0;screenFlash.a=0;
   deck=shuffle(BANK.slice()).slice(0,QUESTIONS_PER_RUN);qi=0;correct=0;ended=false;
+  clearInterval(timerInterval);
+  timerEndsAt=performance.now()+TIME_LIMIT_MS;
+  $('time').textContent='TIME 25:00';
+  timerInterval=setInterval(updateTimer,250);
   $('overlay').style.display='none';showQuestion();
 }
 function showQuestion(){
@@ -318,7 +330,7 @@ function showQuestion(){
   opts.forEach((o,i)=>{const b=document.createElement('button');b.className='opt';b.textContent='ABCD'[i]+'.  '+o.t;b.onclick=()=>answer(i);box.appendChild(b);});
 }
 async function answer(i){
-  if(locked||ended)return;locked=true;
+  if(locked||ended)return;locked=true;answering=true;
   const {q,opts}=current,ok=opts[i].ok;
   [...$('opts').children].forEach((b,k)=>{b.disabled=true;if(opts[k].ok)b.classList.add('ok');else if(k===i)b.classList.add('bad');else b.classList.add('dim');});
   const e=$('exp');e.innerHTML='<b>'+(ok?'✔ Correct! ':'✘ Not quite. ')+'</b>'+q.e+
@@ -326,19 +338,24 @@ async function answer(i){
   e.style.display='block';
   beep(ok?660:180,.15,'triangle',.07,ok?200:-60);
   if(ok){correct++;await heroStrike();}else await enemyStrike();
+  updateTimer();
+  if(ended){answering=false;const restart=$('overlay').querySelector('button');if(restart)restart.disabled=false;return;}
+  answering=false;
   $('prog').textContent='Question '+(qi+1)+' / '+QUESTIONS_PER_RUN+'  ·  Correct: '+correct;
-  if(enemy.hp<=0){ended=true;await enemyExplodes();return finish(true);}
-  if(hero.hp<=0){ended=true;await heroFalls();return finish(false);}
+  if(enemy.hp<=0){ended=true;clearInterval(timerInterval);timerInterval=null;await enemyExplodes();return finish(true);}
+  if(hero.hp<=0){ended=true;clearInterval(timerInterval);timerInterval=null;await heroFalls();return finish(false);}
   $('next').style.display='inline-block';$('next').focus();
 }
 function next(){if(locked&&$('next').style.display==='inline-block'){qi++;showQuestion();}}
-function finish(win){
+function finish(win,timedOut=false){
+  clearInterval(timerInterval);timerInterval=null;timerEndsAt=0;
   const n=qi+1,pct=Math.round(100*correct/n);
   const o=$('overlay');o.className=win?'win':'lose';o.style.display='flex';
   o.innerHTML=win
    ?`<h1>VICTORY!</h1><p>You are the winner! The Cloud Beast is vanquished and you reached the battle target.</p><p>${correct} correct out of ${n} answered (${pct}%). Battle target: 80% correct (24 of 30).</p>`
-   :`<h1>GAME OVER</h1><p>The Cloud Beast has defeated you. Review the explanations and try again!</p><p>${correct} correct out of ${n} answered (${pct}%). Aim for at least 80% correct (24 of 30) to defeat the Cloud Beast.</p>`;
+   :`<h1>GAME OVER</h1><p>${timedOut?'Time is up! The 25-minute limit has been reached.':'The Cloud Beast has defeated you. Review the explanations and try again!'}</p><p>${correct} correct out of ${n} answered (${pct}%). Aim for at least 80% correct (24 of 30) to defeat the Cloud Beast.</p>`;
   const b=document.createElement('button');b.className='big';b.textContent='↻ RESTART';b.onclick=startRun;o.appendChild(b);b.focus();
+  b.disabled=answering;
 }
 $('next').onclick=next;$('mus').onclick=()=>{ac();setMusic(!musicOn);$('mus').blur();};
 addEventListener('keydown',e=>{
@@ -355,7 +372,7 @@ addEventListener('keydown',e=>{
   hero=mkActor('hero','hero',HERO_HOME,HERO_MAX);enemy=mkActor('enemy','enemy',ENEMY_HOME,ENEMY_MAX);
   requestAnimationFrame(frame);
   const o=$('overlay');o.style.display='flex';o.className='';
-  o.innerHTML='<h1 style="color:#6ee7d1">AZ-900 BATTLE QUEST</h1><p>Answer Azure Fundamentals questions to fight the Cloud Beast.</p><p>Correct answer: your knight strikes (−'+DMG_ENEMY+' of '+ENEMY_MAX+' HP). Wrong answer: the beast strikes (−'+DMG_HERO+' of '+HERO_MAX+' HP).</p><p>Land at least 80% correct (24 of 30) to win. Keys: A–D or 1–4 to answer, Enter for next.</p>';
+  o.innerHTML='<h1 style="color:#6ee7d1">AZ-900 BATTLE QUEST</h1><p>Answer Azure Fundamentals questions to fight the Cloud Beast.</p><p>You have 25 minutes to win; when time runs out, the battle is lost.</p><p>Correct answer: your knight strikes (−'+DMG_ENEMY+' of '+ENEMY_MAX+' HP). Wrong answer: the beast strikes (−'+DMG_HERO+' of '+HERO_MAX+' HP).</p><p>Land at least 80% correct (24 of 30) to win. Keys: A–D or 1–4 to answer, Enter for next.</p>';
   const b=document.createElement('button');b.className='big';b.textContent='▶ START BATTLE';b.onclick=startRun;o.appendChild(b);
   $('q').textContent='Press START to begin.';
 })();
